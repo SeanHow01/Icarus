@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>J.A.R.V.I.S.</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            background: #0a0a1a;
+            color: #00d4ff;
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+
+        h1 {
+            font-size: 1.5rem;
+            letter-spacing: 12px;
+            text-transform: uppercase;
+            margin-bottom: 2rem;
+            opacity: 0.6;
+        }
+
+        /* Pulsing circle — the main interaction point */
+        .orb-container {
+            position: relative;
+            width: 200px;
+            height: 200px;
+            margin-bottom: 2rem;
+        }
+
+        .orb {
+            width: 200px;
+            height: 200px;
+            border-radius: 50%;
+            background: radial-gradient(circle, #00d4ff22 0%, #00d4ff05 70%);
+            border: 2px solid #00d4ff33;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            user-select: none;
+        }
+
+        .orb:hover {
+            border-color: #00d4ff88;
+            background: radial-gradient(circle, #00d4ff33 0%, #00d4ff08 70%);
+        }
+
+        .orb.listening {
+            border-color: #00ff88;
+            background: radial-gradient(circle, #00ff8833 0%, #00ff8808 70%);
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+
+        .orb.thinking {
+            border-color: #ffaa00;
+            background: radial-gradient(circle, #ffaa0033 0%, #ffaa0008 70%);
+            animation: pulse 0.8s ease-in-out infinite;
+        }
+
+        .orb.speaking {
+            border-color: #00d4ff;
+            background: radial-gradient(circle, #00d4ff44 0%, #00d4ff08 70%);
+            animation: pulse 1s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+
+        .orb-label {
+            font-size: 0.9rem;
+            letter-spacing: 3px;
+            text-transform: uppercase;
+            opacity: 0.8;
+        }
+
+        .orb.listening .orb-label { color: #00ff88; }
+        .orb.thinking .orb-label { color: #ffaa00; }
+        .orb.speaking .orb-label { color: #00d4ff; }
+
+        /* Transcript area */
+        .transcript {
+            width: 90%;
+            max-width: 600px;
+            max-height: 300px;
+            overflow-y: auto;
+            padding: 1rem;
+        }
+
+        .message {
+            margin-bottom: 1rem;
+            padding: 0.8rem 1rem;
+            border-radius: 8px;
+            font-size: 0.95rem;
+            line-height: 1.5;
+        }
+
+        .message.user {
+            background: #ffffff0a;
+            border-left: 3px solid #00ff88;
+            color: #aaa;
+        }
+
+        .message.jarvis {
+            background: #00d4ff0a;
+            border-left: 3px solid #00d4ff;
+        }
+
+        .status {
+            position: fixed;
+            bottom: 1rem;
+            font-size: 0.75rem;
+            opacity: 0.4;
+            letter-spacing: 2px;
+        }
+
+        /* Text input fallback */
+        .text-input-area {
+            width: 90%;
+            max-width: 600px;
+            display: flex;
+            gap: 0.5rem;
+            margin-top: 1rem;
+        }
+
+        .text-input-area input {
+            flex: 1;
+            background: #ffffff0a;
+            border: 1px solid #00d4ff33;
+            color: #00d4ff;
+            padding: 0.6rem 1rem;
+            border-radius: 6px;
+            font-size: 0.95rem;
+            outline: none;
+        }
+
+        .text-input-area input:focus {
+            border-color: #00d4ff88;
+        }
+
+        .text-input-area button {
+            background: #00d4ff22;
+            border: 1px solid #00d4ff44;
+            color: #00d4ff;
+            padding: 0.6rem 1.2rem;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.9rem;
+        }
+
+        .text-input-area button:hover {
+            background: #00d4ff33;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>J.A.R.V.I.S.</h1>
+
+    <div class="orb-container">
+        <div class="orb" id="orb" onclick="toggleListening()">
+            <span class="orb-label" id="orbLabel">Tap to speak</span>
+        </div>
+    </div>
+
+    <div class="transcript" id="transcript"></div>
+
+    <div class="text-input-area">
+        <input type="text" id="textInput" placeholder="Or type here..." onkeydown="if(event.key==='Enter') sendText()">
+        <button onclick="sendText()">Send</button>
+    </div>
+
+    <div class="status" id="status">Voice + Text Interface</div>
+
+    <script>
+        const orb = document.getElementById('orb');
+        const orbLabel = document.getElementById('orbLabel');
+        const transcript = document.getElementById('transcript');
+        const textInput = document.getElementById('textInput');
+        const status = document.getElementById('status');
+
+        const BACKEND_URL = 'http://localhost:5000';
+
+        // --- Speech Recognition Setup ---
+        let recognition = null;
+        let isListening = false;
+
+        // Check browser support
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (SpeechRecognition) {
+            recognition = new SpeechRecognition();
+            recognition.continuous = false;
+            recognition.interimResults = false;
+            recognition.lang = 'en-GB';
+
+            recognition.onresult = (event) => {
+                const spoken = event.results[0][0].transcript;
+                stopListening();
+                addMessage('user', spoken);
+                sendToJarvis(spoken);
+            };
+
+            recognition.onerror = (event) => {
+                console.error('Speech error:', event.error);
+                stopListening();
+                if (event.error === 'no-speech') {
+                    orbLabel.textContent = 'Tap to speak';
+                } else {
+                    orbLabel.textContent = 'Try again';
+                }
+            };
+
+            recognition.onend = () => {
+                if (isListening) stopListening();
+            };
+        } else {
+            status.textContent = 'Voice not supported — use text input below';
+        }
+
+        // --- Voice Controls ---
+
+        function toggleListening() {
+            if (!recognition) return;
+            if (isListening) {
+                recognition.stop();
+                stopListening();
+            } else {
+                startListening();
+            }
+        }
+
+        function startListening() {
+            isListening = true;
+            orb.className = 'orb listening';
+            orbLabel.textContent = 'Listening...';
+            recognition.start();
+        }
+
+        function stopListening() {
+            isListening = false;
+            orb.className = 'orb';
+            orbLabel.textContent = 'Tap to speak';
+        }
+
+        // --- Text Input ---
+
+        function sendText() {
+            const text = textInput.value.trim();
+            if (!text) return;
+            textInput.value = '';
+            addMessage('user', text);
+            sendToJarvis(text);
+        }
+
+        // --- Send to Backend ---
+
+        async function sendToJarvis(message) {
+            orb.className = 'orb thinking';
+            orbLabel.textContent = 'Thinking...';
+
+            try {
+                const response = await fetch(`${BACKEND_URL}/chat`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message }),
+                });
+
+                const data = await response.json();
+
+                if (data.error) {
+                    addMessage('jarvis', `Error: ${data.error}`);
+                    orb.className = 'orb';
+                    orbLabel.textContent = 'Tap to speak';
+                    return;
+                }
+
+                addMessage('jarvis', data.reply);
+                speakReply(data.reply);
+
+            } catch (err) {
+                addMessage('jarvis', 'I cannot reach the backend. Is server.py running?');
+                orb.className = 'orb';
+                orbLabel.textContent = 'Tap to speak';
+            }
+        }
+
+        // --- Text-to-Speech ---
+
+        function speakReply(text) {
+            orb.className = 'orb speaking';
+            orbLabel.textContent = 'Speaking...';
+
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.rate = 1.0;
+            utterance.pitch = 0.9;
+
+            // Try to pick a British English voice
+            const voices = speechSynthesis.getVoices();
+            const british = voices.find(v => v.lang === 'en-GB') || voices[0];
+            if (british) utterance.voice = british;
+
+            utterance.onend = () => {
+                orb.className = 'orb';
+                orbLabel.textContent = 'Tap to speak';
+            };
+
+            speechSynthesis.speak(utterance);
+        }
+
+        // Load voices (needed for some browsers)
+        speechSynthesis.onvoiceschanged = () => speechSynthesis.getVoices();
+
+        // --- Transcript ---
+
+        function addMessage(role, text) {
+            const div = document.createElement('div');
+            div.className = `message ${role}`;
+            div.textContent = role === 'user' ? `You: ${text}` : `Jarvis: ${text}`;
+            transcript.appendChild(div);
+            transcript.scrollTop = transcript.scrollHeight;
+        }
+    </script>
+</body>
+</html>
